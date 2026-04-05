@@ -1,0 +1,6 @@
+{
+  "embedding_provider_id": {
+    "description": "用于向量化的嵌入模型",
+    "type": "string"
+  }
+}
