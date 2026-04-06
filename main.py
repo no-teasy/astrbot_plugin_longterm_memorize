@@ -72,8 +72,8 @@ class LongMemory(Star):
         """设置长期记忆，会附加到system提示词中
 
         Args:
-            content: 内容，用markdown和英文，尽量简洁
-            method: 设置方法，可选值为：replace, append
+            content(string): 内容，用markdown和英文，尽量简洁
+            method(string): 设置方法，可选值为：replace, append
         Returns:
             设置结果
         """
@@ -103,8 +103,8 @@ class LongMemory(Star):
         """设置灵魂，用于对话风格相关功能
 
         Args:
-            content: 内容，用markdown和英文，尽量简洁
-            method: 设置方法，可选值为：replace, append
+            content(string): 内容，用markdown和英文，尽量简洁
+            method(string): 设置方法，可选值为：replace, append
         Returns:
             设置结果
         """
@@ -134,7 +134,7 @@ class LongMemory(Star):
         """设置最近记忆，使近1天的对话都可以记住这个内容
 
         Args:
-            content: 内容，用markdown和英文，尽量简洁
+            content(string): 内容，用markdown和英文，尽量简洁
         Returns:
             设置结果
         """
@@ -231,7 +231,7 @@ class LongMemory(Star):
         """创建包含记忆的提示词
 
         Args:
-            message: 用户消息
+            message(string): 用户消息
         Returns:
             提示词
         """
