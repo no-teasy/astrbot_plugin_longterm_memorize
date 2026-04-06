@@ -21,12 +21,13 @@ class LongMemory(Star):
         self.vector_db: Optional[ZVecVectorDB] = None
         self.context = context
         self.plugin_data_path: Optional[str] = None
+        self._embedding_dim: Optional[int] = None
 
     async def initialize(self) -> None:
         """初始化插件，设置数据路径并初始化向量数据库"""
         try:
             self._setup_plugin_data_path()
-            await self._initialize_vector_db()
+            self._initialize_vector_db()
         except Exception as e:
             logger.error(f"长期记忆插件初始化失败: {e}")
 
@@ -38,7 +39,7 @@ class LongMemory(Star):
         os.makedirs(self.plugin_data_path, exist_ok=True)
         logger.debug(f"插件数据路径设置为: {self.plugin_data_path}")
 
-    async def _initialize_vector_db(self) -> None:
+    def _initialize_vector_db(self) -> None:
         """初始化向量数据库"""
         embedding_dim = self._get_embedding_dim()
         if embedding_dim and self.plugin_data_path:
@@ -55,7 +56,7 @@ class LongMemory(Star):
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         """LLM请求钩子，在请求前添加记忆到系统提示词"""
         await event.send(MessageChain().message("🤔 thinking..."))
-        req.system_prompt += self._create_prompt(event.get_message_str())
+        req.system_prompt += await self._create_prompt(event.get_message_str())
 
     @filter.command("test")
     async def test_command(self, event: AstrMessageEvent) -> None:
@@ -77,9 +78,15 @@ class LongMemory(Star):
             设置结果
         """
         try:
+            if not isinstance(content, str):
+                logger.warning("set_memory: 内容必须是字符串类型")
+                return "error: 内容必须是字符串类型"
             if not content:
                 logger.warning("set_memory: 内容为空")
                 return "error: 内容不能为空"
+            if not isinstance(method, str):
+                logger.warning("set_memory: 方法必须是字符串类型")
+                return "error: 方法必须是字符串类型"
             if method not in ["replace", "append"]:
                 logger.warning(f"set_memory: 无效的方法: {method}")
                 return "error: 无效的方法，可选值为 replace 或 append"
@@ -102,9 +109,15 @@ class LongMemory(Star):
             设置结果
         """
         try:
+            if not isinstance(content, str):
+                logger.warning("set_soul: 内容必须是字符串类型")
+                return "error: 内容必须是字符串类型"
             if not content:
                 logger.warning("set_soul: 内容为空")
                 return "error: 内容不能为空"
+            if not isinstance(method, str):
+                logger.warning("set_soul: 方法必须是字符串类型")
+                return "error: 方法必须是字符串类型"
             if method not in ["replace", "append"]:
                 logger.warning(f"set_soul: 无效的方法: {method}")
                 return "error: 无效的方法，可选值为 replace 或 append"
@@ -126,6 +139,9 @@ class LongMemory(Star):
             设置结果
         """
         try:
+            if not isinstance(content, str):
+                logger.warning("set_recent_memory: 内容必须是字符串类型")
+                return "error: 内容必须是字符串类型"
             if not content:
                 logger.warning("set_recent_memory: 内容为空")
                 return "error: 内容不能为空"
@@ -138,7 +154,7 @@ class LongMemory(Star):
                     "timestamp": timestamp,
                     "filename": file_name
                 }
-                doc_id = await self.vector_db.store(content, metadata)
+                doc_id = await self._store_to_vector_db(content, metadata)
                 if doc_id:
                     content_with_id = f"{content}\n\n[ID: {doc_id}]\n[Timestamp: {timestamp}]\n"
                     self._file_operation(file_name, content_with_id, False)
@@ -162,22 +178,23 @@ class LongMemory(Star):
             content: 内容
             replace: 是否替换
         """
-        try:
-            if not self.plugin_data_path:
-                raise ValueError("插件数据路径未设置")
-                
-            full_path = os.path.join(self.plugin_data_path, file_path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        if not self.plugin_data_path:
+            raise ValueError("插件数据路径未设置")
+        
+        # 检查内容大小，限制为10MB
+        max_size = 10 * 1024 * 1024  # 10MB
+        if len(content) > max_size:
+            raise ValueError(f"内容大小超过限制 ({max_size / (1024 * 1024):.1f}MB)")
             
-            mode = "w" if replace else "a"
-            with open(full_path, mode, encoding="utf-8") as f:
-                f.write(content)
-            
-            operation = "替换" if replace else "追加"
-            logger.debug(f"文件已{operation}: {full_path}")
-        except Exception as e:
-            logger.error(f"文件操作失败 {file_path}: {e}")
-            raise
+        full_path = os.path.join(self.plugin_data_path, file_path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        
+        mode = "w" if replace else "a"
+        with open(full_path, mode, encoding="utf-8") as f:
+            f.write(content)
+        
+        operation = "替换" if replace else "追加"
+        logger.debug(f"文件已{operation}: {full_path}")
 
     def _read_file(self, file_path: str) -> str:
         """读取文件内容
@@ -192,6 +209,13 @@ class LongMemory(Star):
                 raise ValueError("插件数据路径未设置")
                 
             full_path = os.path.join(self.plugin_data_path, file_path)
+            
+            # 检查文件大小，限制为10MB
+            max_size = 10 * 1024 * 1024  # 10MB
+            if os.path.exists(full_path) and os.path.getsize(full_path) > max_size:
+                logger.warning(f"文件过大，超过限制 ({max_size / (1024 * 1024):.1f}MB): {full_path}")
+                return ""
+            
             with open(full_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 logger.debug(f"已读取文件: {full_path}，大小: {len(content)} 字符")
@@ -203,7 +227,7 @@ class LongMemory(Star):
             logger.error(f"读取文件失败 {file_path}: {e}")
             return ""
 
-    def _create_prompt(self, message: str) -> str:
+    async def _create_prompt(self, message: str) -> str:
         """创建包含记忆的提示词
 
         Args:
@@ -222,8 +246,8 @@ class LongMemory(Star):
         prompt += self._read_file(recent_file_name)
         prompt += "---you can use tools to change them---"
         
-        if self.vector_db and self._get_embedding_dim():
-            results = self._search_memory(message)
+        if self.vector_db:
+            results = await self._search_memory(message)
             if results:
                 prompt += "\n"
                 prompt += "---RAG---"
@@ -252,12 +276,16 @@ class LongMemory(Star):
         Returns:
             嵌入维度
         """
+        if self._embedding_dim is not None:
+            return self._embedding_dim
+        
         provider = self._get_embedding_provider()
         if not provider:
             logger.warning("无法获取嵌入模型提供商")
             return None
         try:
-            return provider.get_dim()
+            self._embedding_dim = provider.get_dim()
+            return self._embedding_dim
         except Exception as e:
             logger.error(f"获取嵌入维度失败: {e}")
             return None
@@ -313,6 +341,9 @@ class LongMemory(Star):
             if self.vector_db is None:
                 logger.warning("向量数据库未初始化")
                 return None
+            if not isinstance(text, str):
+                logger.warning("store: 文本必须是字符串类型")
+                return None
             if not text:
                 logger.warning("store: 文本内容为空")
                 return None
@@ -341,6 +372,12 @@ class LongMemory(Star):
         """
         if self.vector_db is None:
             return None
+        if not isinstance(query_text, str):
+            logger.warning("search: 查询文本必须是字符串类型")
+            return None
+        if not isinstance(topk, int) or topk <= 0:
+            logger.warning("search: topk必须是正整数")
+            topk = 5
         embedding = await self._generate_embedding(query_text)
         if not embedding:
             logger.error("无法生成查询嵌入向量")
@@ -358,6 +395,9 @@ class LongMemory(Star):
         try:
             if self.vector_db is None:
                 logger.warning("向量数据库未初始化")
+                return False
+            if not isinstance(text, str):
+                logger.warning("delete: 文本必须是字符串类型")
                 return False
             if not text:
                 logger.warning("delete: 文本内容为空")
